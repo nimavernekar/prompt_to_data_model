@@ -2,62 +2,107 @@ import streamlit as st
 import subprocess
 import json
 import re
-from graphviz import Digraph
+import graphviz
 
-st.set_page_config(page_title="Prompt → Data Model + DDL", page_icon="🧩", layout="centered")
+# =========================
+# Header + Theme Toggle
+# =========================
+st.set_page_config(page_title="Prompt → Data Model + DDL", page_icon="🧩", layout="wide")
 
-# --- Header ---
-st.title("🧠 Prompt → Data Model + SQL DDL Generator")
-st.write("Provide a business scenario and generate star schema, SQL DDL, and ERD diagram.")
+col_title, col_toggle = st.columns([4, 1], vertical_alignment="center")
+with col_title:
+    st.title("🧠 Prompt → Data Model + SQL DDL Generator")
+with col_toggle:
+    dark_mode = st.toggle("🌙 Dark Mode", key="theme_toggle", value=False)
 
-# --- Input prompt ---
+# Global theme styles
+if dark_mode:
+    st.markdown(
+        """
+        <style>
+            .stApp { background-color: #121212; color: #e8e8e8; }
+            .stTextArea textarea, .stSelectbox div[data-baseweb="select"] { background: #1e1e1e !important; color: #e8e8e8 !important; }
+            .stDownloadButton button, .stButton button { background: #2a2a2a !important; color: #e8e8e8 !important; border: 1px solid #3a3a3a !important; }
+            .stCode code { background: #0f0f0f !important; color: #e8e8e8 !important; }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
+st.write("Enter a business scenario to generate Star Schema, SQL DDL, and an ERD diagram.")
+
+# =========================
+# Inputs
+# =========================
 user_prompt = st.text_area(
-    "📝 Describe your data scenario:",
+    "Describe your data scenario:",
     height=150,
     placeholder="e.g. Analyze online sales by product, customer, and time."
 )
 
-sql_dialect = st.selectbox("🗂 Select SQL Dialect:", ["ANSI SQL", "Snowflake", "Databricks", "PostgreSQL", "MySQL"])
+sql_dialect = st.selectbox(
+    "Select SQL Dialect:",
+    ["ANSI SQL", "Snowflake", "Databricks", "PostgreSQL", "MySQL"]
+)
 
+# =========================
+# Helpers
+# =========================
 def generate_ddl(schema_json, dialect="ANSI SQL"):
-    """Generate SQL CREATE TABLE statements from JSON schema, with dialect hints."""
     ddl_statements = []
-    comment = f"-- SQL Dialect: {dialect}\n"
+    header = f"-- SQL Dialect: {dialect}\n"
 
-    # Fact table
     fact = schema_json.get("fact_table")
     if fact:
-        columns = [f"{col['name']} {col['type']}" for col in fact["columns"]]
-        ddl = f"CREATE TABLE {fact['name']} (\n    " + ",\n    ".join(columns) + "\n);"
-        ddl_statements.append(ddl)
+        cols = [f"{c['name']} {c['type']}" for c in fact.get("columns", [])]
+        ddl_statements.append(
+            f"CREATE TABLE {fact['name']} (\n    " + ",\n    ".join(cols) + "\n);"
+        )
 
-    # Dimension tables
     for dim in schema_json.get("dimension_tables", []):
-        columns = [f"{col['name']} {col['type']}" for col in dim["columns"]]
-        ddl = f"CREATE TABLE {dim['name']} (\n    " + ",\n    ".join(columns) + "\n);"
-        ddl_statements.append(ddl)
+        cols = [f"{c['name']} {c['type']}" for c in dim.get("columns", [])]
+        ddl_statements.append(
+            f"CREATE TABLE {dim['name']} (\n    " + ",\n    ".join(cols) + "\n);"
+        )
 
-    return comment + "\n\n".join(ddl_statements)
-
+    return header + "\n\n".join(ddl_statements)
 
 @st.cache_data(show_spinner=False)
-def call_ollama_cached(full_prompt):
-    """Call Ollama and cache results for identical prompts."""
-    response = subprocess.run(
+def call_ollama_cached(full_prompt: str) -> str:
+    resp = subprocess.run(
         ["ollama", "run", "llama3"],
         input=full_prompt.encode("utf-8"),
         capture_output=True,
         text=False
     )
-    output = response.stdout.decode("utf-8").strip()
-    return output
+    return resp.stdout.decode("utf-8").strip()
 
+def generate_erd(schema_json) -> graphviz.Digraph:
+    dot = graphviz.Digraph(comment="Star Schema ERD")
+    dot.attr(rankdir="LR")
 
-if st.button("Generate Schema + SQL DDL"):
+    fact = schema_json.get("fact_table")
+    fact_name = fact["name"] if fact else None
+
+    if fact_name:
+        dot.node(fact_name, f"FACT: {fact_name}", shape="box", style="filled", color="lightblue")
+
+    for dim in schema_json.get("dimension_tables", []):
+        dim_name = dim["name"]
+        dot.node(dim_name, f"DIM: {dim_name}", shape="ellipse", style="filled", color="lightgray")
+        if fact_name:
+            dot.edge(dim_name, fact_name)
+
+    return dot
+
+# =========================
+# Main Action
+# =========================
+if st.button("Generate Schema + SQL DDL + ERD", type="primary"):
     if not user_prompt.strip():
         st.warning("Please enter a prompt first.")
     else:
-        with st.spinner("Generating schema with Llama 3..."):
+        with st.spinner("Generating with Llama 3..."):
             try:
                 full_prompt = f"""
 You are a data modeling assistant. The user will describe a business scenario.
@@ -84,59 +129,45 @@ SQL Dialect: {sql_dialect}
 User prompt: {user_prompt}
 """
 
-                # Cached model call
                 output = call_ollama_cached(full_prompt)
 
-                # Extract JSON
-                json_match = re.search(r"\{(?:.|\n)*\}", output)
-                if json_match:
+                # Extract JSON from model output
+                match = re.search(r"\{(?:.|\n)*\}", output)
+                if not match:
+                    st.error("⚠️ Could not find JSON in model output. Showing raw text:")
+                    st.text_area("Raw Output", output, height=300)
+                else:
                     try:
-                        schema_json = json.loads(json_match.group(0))
+                        schema_json = json.loads(match.group(0))
 
-                        # Tabs for JSON + DDL
-                        tab1, tab2 = st.tabs(["📄 Star Schema JSON", "💾 SQL DDL"])
-
-                        with tab1:
-                            st.json(schema_json)
-
-                        with tab2:
-                            ddl = generate_ddl(schema_json, sql_dialect)
-                            st.code(ddl, language="sql")
-
-                        # --- ERD Diagram below tabs ---
-                        st.subheader("🗺️ ERD Diagram")
-                        erd = generate_erd(schema_json)
-                        st.graphviz_chart(erd)
-
-                        # Downloads
                         st.subheader("🌟 Generated Star Schema (JSON)")
                         st.json(schema_json)
 
-                        st.download_button(
-                            label="💾 Download Schema JSON",
-                            data=json.dumps(schema_json, indent=2),
-                            file_name="data_model_schema.json",
-                            mime="application/json"
-                        )
-
-                        # Generate DDL
                         ddl = generate_ddl(schema_json, sql_dialect)
                         st.subheader("💻 Generated SQL DDL")
                         st.code(ddl, language="sql")
 
                         st.download_button(
-                            label="💾 Download SQL DDL",
+                            "Download Schema JSON",
+                            data=json.dumps(schema_json, indent=2),
+                            file_name="data_model_schema.json",
+                            mime="application/json"
+                        )
+                        st.download_button(
+                            "Download SQL DDL",
                             data=ddl,
                             file_name="data_model_schema.sql",
                             mime="text/sql"
                         )
 
+                        st.subheader("🗺️ ERD Diagram")
+                        erd = generate_erd(schema_json)
+                        # Use Streamlit's built-in Graphviz renderer (no system 'dot' needed)
+                        st.graphviz_chart(erd.source)
+
                     except json.JSONDecodeError:
-                        st.error("⚠️ Could not parse JSON even after extraction. Showing raw output:")
+                        st.error("⚠️ JSON parsing failed. Showing raw output:")
                         st.text_area("Raw Output", output, height=300)
-                else:
-                    st.error("⚠️ Could not find JSON in model output. Showing raw text:")
-                    st.text_area("Raw Output", output, height=300)
 
             except Exception as e:
-                st.error(f"❌ Error: {str(e)}")
+                st.error(f"❌ Error: {e}")
