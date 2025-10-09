@@ -39,6 +39,7 @@ def generate_ddl(schema_json, dialect="ANSI SQL"):
 
     return comment + "\n\n".join(ddl_statements)
 
+
 @st.cache_data(show_spinner=False)
 def call_ollama_cached(full_prompt):
     """Call Ollama and cache results for identical prompts."""
@@ -51,24 +52,8 @@ def call_ollama_cached(full_prompt):
     output = response.stdout.decode("utf-8").strip()
     return output
 
-def generate_erd(schema_json):
-    """Generate ERD diagram using graphviz."""
-    dot = Digraph()
 
-    # Add fact table
-    fact = schema_json.get("fact_table")
-    if fact:
-        dot.node(fact["name"], f"{fact['name']}", shape="box")
-
-    # Add dimension tables and relationships
-    for dim in schema_json.get("dimension_tables", []):
-        dot.node(dim["name"], dim["name"], shape="ellipse")
-        if fact:
-            dot.edge(dim["name"], fact["name"])
-
-    return dot
-
-if st.button("🚀 Generate Schema + SQL DDL"):
+if st.button("Generate Schema + SQL DDL"):
     if not user_prompt.strip():
         st.warning("Please enter a prompt first.")
     else:
@@ -124,12 +109,20 @@ User prompt: {user_prompt}
                         st.graphviz_chart(erd)
 
                         # Downloads
+                        st.subheader("🌟 Generated Star Schema (JSON)")
+                        st.json(schema_json)
+
                         st.download_button(
                             label="💾 Download Schema JSON",
                             data=json.dumps(schema_json, indent=2),
                             file_name="data_model_schema.json",
                             mime="application/json"
                         )
+
+                        # Generate DDL
+                        ddl = generate_ddl(schema_json, sql_dialect)
+                        st.subheader("💻 Generated SQL DDL")
+                        st.code(ddl, language="sql")
 
                         st.download_button(
                             label="💾 Download SQL DDL",
