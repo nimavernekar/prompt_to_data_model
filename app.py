@@ -1,10 +1,7 @@
-# app.py
 import streamlit as st
 import subprocess
 import json
 import re
-
-from ddl_generator import extract_schema_info, generate_ddl
 
 st.set_page_config(page_title="Prompt → Data Model + DDL", page_icon="🧩", layout="centered")
 
@@ -20,41 +17,50 @@ user_prompt = st.text_area(
     placeholder="e.g. Analyze online sales by product, customer, and time."
 )
 
-# --- SQL Dialect selection ---
-dialect = st.selectbox("SQL Dialect", ["Postgres", "MySQL", "Snowflake", "BigQuery", "SQLServer"])
+sql_dialect = st.selectbox("Select SQL Dialect:", ["ANSI SQL", "Snowflake", "Databricks", "PostgreSQL", "MySQL"])
 
-def call_ollama_cli(prompt: str, model: str = "llama3") -> str:
-    """
-    Run the Ollama model via subprocess and return stdout as text.
-    """
-    proc = subprocess.run(
-        ["ollama", "run", model],
-        input=prompt.encode("utf-8"),
-        capture_output=True
+
+def generate_ddl(schema_json, dialect="ANSI SQL"):
+    """Generate SQL CREATE TABLE statements from JSON schema, with dialect hints."""
+    ddl_statements = []
+    comment = f"-- SQL Dialect: {dialect}\n"
+
+    # Fact table
+    fact = schema_json.get("fact_table")
+    if fact:
+        columns = [f"{col['name']} {col['type']}" for col in fact["columns"]]
+        ddl = f"CREATE TABLE {fact['name']} (\n    " + ",\n    ".join(columns) + "\n);"
+        ddl_statements.append(ddl)
+
+    # Dimension tables
+    for dim in schema_json.get("dimension_tables", []):
+        columns = [f"{col['name']} {col['type']}" for col in dim["columns"]]
+        ddl = f"CREATE TABLE {dim['name']} (\n    " + ",\n    ".join(columns) + "\n);"
+        ddl_statements.append(ddl)
+
+    return comment + "\n\n".join(ddl_statements)
+
+
+@st.cache_data(show_spinner=False)
+def call_ollama_cached(full_prompt):
+    """Call Ollama and cache results for identical prompts."""
+    response = subprocess.run(
+        ["ollama", "run", "llama3"],
+        input=full_prompt.encode("utf-8"),
+        capture_output=True,
+        text=False
     )
-    return proc.stdout.decode("utf-8")
+    output = response.stdout.decode("utf-8").strip()
+    return output
 
 
-def extract_json_from_output(output: str) -> str:
-    """
-    Try to extract JSON block from model output (handles ```json``` code fences or the first {...} block).
-    Returns the JSON string or raises ValueError.
-    """
-    # code fence search
-    m = re.search(r"```(?:json)?\s*(\{(?:.|\n)*\})\s*```", output, re.DOTALL | re.IGNORECASE)
-    if m:
-        return m.group(1)
-
-    # fallback: first brace block
-    m2 = re.search(r"(\{(?:.|\n)*\})", output, re.DOTALL)
-    if m2:
-        return m2.group(1)
-
-    raise ValueError("⚠️ Could not find JSON in model output.")
-
-
-def build_model_prompt(user_prompt: str) -> str:
-    return f"""
+if st.button("Generate Schema + SQL DDL"):
+    if not user_prompt.strip():
+        st.warning("Please enter a prompt first.")
+    else:
+        with st.spinner("Generating schema with Llama 3..."):
+            try:
+                full_prompt = f"""
 You are a data modeling assistant. The user will describe a business scenario.
 Design a STAR SCHEMA (1 fact table + supporting dimension tables).
 Return the schema ONLY in valid JSON format with this structure:
@@ -75,57 +81,46 @@ Return the schema ONLY in valid JSON format with this structure:
   ]
 }}
 
+SQL Dialect: {sql_dialect}
 User prompt: {user_prompt}
 """
 
+                # Cached model call
+                output = call_ollama_cached(full_prompt)
 
-if st.button("Generate Schema + SQL DDL"):
-    if not user_prompt.strip():
-        st.warning("Please enter a prompt first.")
-    else:
-        with st.spinner("Generating schema with Llama 3..."):
-            try:
-                full_prompt = build_model_prompt(user_prompt)
-                raw_output = call_ollama_cli(full_prompt, model="llama3")
-                # extract JSON string
-                try:
-                    json_text = extract_json_from_output(raw_output)
-                except ValueError:
-                    st.error("⚠️ Could not find a JSON block in model output. See raw output below.")
-                    st.text_area("Raw Output", raw_output, height=300)
-                    raise
+                # Extract JSON
+                json_match = re.search(r"\{(?:.|\n)*\}", output)
+                if json_match:
+                    try:
+                        schema_json = json.loads(json_match.group(0))
+                        st.subheader("🌟 Generated Star Schema (JSON)")
+                        st.json(schema_json)
 
-                # parse JSON into dict
-                try:
-                    schema_json = json.loads(json_text)
-                except json.JSONDecodeError as e:
-                    st.error(f"⚠️ JSON parse failed: {e}")
-                    st.text_area("Raw JSON", json_text, height=300)
-                    raise
+                        st.download_button(
+                            label="💾 Download Schema JSON",
+                            data=json.dumps(schema_json, indent=2),
+                            file_name="data_model_schema.json",
+                            mime="application/json"
+                        )
 
-                # show JSON
-                st.subheader("🌟 Generated Star Schema (JSON)")
-                st.json(schema_json)
+                        # Generate DDL
+                        ddl = generate_ddl(schema_json, sql_dialect)
+                        st.subheader("💻 Generated SQL DDL")
+                        st.code(ddl, language="sql")
 
-                # generate dialect-aware DDL
-                ddl = generate_ddl(schema_json, dialect)
-                st.subheader("💻 Generated SQL DDL")
-                st.code(ddl, language="sql")
+                        st.download_button(
+                            label="💾 Download SQL DDL",
+                            data=ddl,
+                            file_name="data_model_schema.sql",
+                            mime="text/sql"
+                        )
 
-                # downloads
-                st.download_button(
-                    label="💾 Download Schema JSON",
-                    data=json.dumps(schema_json, indent=2),
-                    file_name="data_model_schema.json",
-                    mime="application/json"
-                )
-                st.download_button(
-                    label="💾 Download SQL DDL",
-                    data=ddl,
-                    file_name="data_model_schema.sql",
-                    mime="text/sql"
-                )
+                    except json.JSONDecodeError:
+                        st.error("⚠️ Could not parse JSON even after extraction. Showing raw output:")
+                        st.text_area("Raw Output", output, height=300)
+                else:
+                    st.error("⚠️ Could not find JSON in model output. Showing raw text:")
+                    st.text_area("Raw Output", output, height=300)
 
             except Exception as e:
-                # error already displayed above; show concise message
                 st.error(f"❌ Error: {str(e)}")
