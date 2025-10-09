@@ -2,23 +2,22 @@ import streamlit as st
 import subprocess
 import json
 import re
+from graphviz import Digraph
 
 st.set_page_config(page_title="Prompt → Data Model + DDL", page_icon="🧩", layout="centered")
 
+# --- Header ---
 st.title("🧠 Prompt → Data Model + SQL DDL Generator")
-st.write(
-    "Enter a business scenario. The local Llama 3 model will design a **Star Schema** and generate SQL DDL statements for you."
-)
+st.write("Provide a business scenario and generate star schema, SQL DDL, and ERD diagram.")
 
 # --- Input prompt ---
 user_prompt = st.text_area(
-    "Describe your data scenario:",
+    "📝 Describe your data scenario:",
     height=150,
     placeholder="e.g. Analyze online sales by product, customer, and time."
 )
 
-sql_dialect = st.selectbox("Select SQL Dialect:", ["ANSI SQL", "Snowflake", "Databricks", "PostgreSQL", "MySQL"])
-
+sql_dialect = st.selectbox("🗂 Select SQL Dialect:", ["ANSI SQL", "Snowflake", "Databricks", "PostgreSQL", "MySQL"])
 
 def generate_ddl(schema_json, dialect="ANSI SQL"):
     """Generate SQL CREATE TABLE statements from JSON schema, with dialect hints."""
@@ -93,6 +92,23 @@ User prompt: {user_prompt}
                 if json_match:
                     try:
                         schema_json = json.loads(json_match.group(0))
+
+                        # Tabs for JSON + DDL
+                        tab1, tab2 = st.tabs(["📄 Star Schema JSON", "💾 SQL DDL"])
+
+                        with tab1:
+                            st.json(schema_json)
+
+                        with tab2:
+                            ddl = generate_ddl(schema_json, sql_dialect)
+                            st.code(ddl, language="sql")
+
+                        # --- ERD Diagram below tabs ---
+                        st.subheader("🗺️ ERD Diagram")
+                        erd = generate_erd(schema_json)
+                        st.graphviz_chart(erd)
+
+                        # Downloads
                         st.subheader("🌟 Generated Star Schema (JSON)")
                         st.json(schema_json)
 
