@@ -25,7 +25,7 @@ brew install graphviz
 ```
 
 ## 📌 Tech Stack
--Python
--Streamlit
--Graphviz
--Ollama / Llama 3 (local model)
+- Python
+- Streamlit
+- Graphviz
+- Ollama / Llama 3 (local model)
