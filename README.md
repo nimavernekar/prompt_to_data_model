@@ -29,13 +29,4 @@ Python
 Streamlit
 Graphviz
 Ollama / Llama 3 (local model)
-
-
----
-
-# ✅ 4️⃣ Add & Commit README
-
-```bash
-git add README.md
-git commit -m "Add README documentation"
-git push origin feature/erd-visualization
+```
