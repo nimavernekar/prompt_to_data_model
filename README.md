@@ -21,12 +21,11 @@ A Streamlit-powered app that:
 python -m streamlit run app.py
 
 Make sure Graphviz is installed:
-
-
 brew install graphviz
-📌 Tech Stack
-Python
-Streamlit
-Graphviz
-Ollama / Llama 3 (local model)
 ```
+
+## 📌 Tech Stack
+-Python
+-Streamlit
+-Graphviz
+-Ollama / Llama 3 (local model)
