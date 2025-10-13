@@ -184,34 +184,55 @@ if st.button("Generate Schema + SQL DDL + ERD", type="primary"):
         with st.spinner("Generating with Llama 3..."):
             try:
                 file_context = extract_file_context(uploaded_files) if uploaded_files else "No external documents provided."
-
+                #if file_context and file_context.strip() != "No external documents provided.":
                 full_prompt = f"""
-You are a data modeling assistant. The user will describe a business scenario.
-Design a STAR SCHEMA (1 fact table + supporting dimension tables).
-Return the schema ONLY in valid JSON format with this structure:
-{{
-  "fact_table": {{
-    "name": "FactTableName",
-    "columns": [
-      {{"name": "ColumnName", "type": "datatype", "description": "what it stores"}}
-    ]
-  }},
-  "dimension_tables": [
-    {{
-      "name": "DimTableName",
-      "columns": [
-        {{"name": "ColumnName", "type": "datatype", "description": "what it stores"}}
-      ]
-    }}
-  ]
-}}
 
-User prompt: {user_prompt}
-Additional context from uploaded files:
+                You are a data modeling assistant.
 
-{file_context}
-SQL Dialect: {sql_dialect}
-"""
+                Follow these rules carefully:
+
+                1. Use ALL columns and datatypes from uploaded files exactly as they appear.
+                - Do not rename or ignore them.
+                - Include them in relevant dimension or fact tables.
+
+                2. If the user prompt mentions concepts or entities NOT found in the uploaded files (e.g., purchases, subscriptions, orders):
+                - You MAY create new tables and columns to represent them.
+                - Infer column names and datatypes logically.
+                - Do NOT remove any file-based fields just because they weren’t mentioned.
+
+                3. Prioritize file-grounded fields first. Then extend with reasonable invented fields as needed to satisfy the user prompt.
+
+                4. The final design should blend:
+                ✅ File-based columns
+                ✅ Prompt-driven inferred columns (only where files don’t cover it)
+               
+                5. Output MUST follow this strict JSON format:
+                {{
+                "fact_table": {{
+                    "name": "FactTableName",
+                    "columns": [
+                    {{"name": "ColumnName", "type": "datatype", "description": "what it stores"}}
+                    ]
+                }},
+                "dimension_tables": [
+                    {{
+                    "name": "DimTableName",
+                    "columns": [
+                        {{"name": "ColumnName", "type": "datatype", "description": "what it stores"}}
+                    ]
+                    }}
+                ]
+                }}
+
+                User Prompt:
+                {user_prompt}
+
+                Uploaded File Context (use everything here first, and extend only when needed):
+                {file_context}
+
+                SQL Dialect: {sql_dialect}
+                """
+
 
                 output = call_ollama_cached(full_prompt)
 
