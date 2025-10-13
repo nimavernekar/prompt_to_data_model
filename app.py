@@ -3,6 +3,77 @@ import subprocess
 import json
 import re
 import graphviz
+import pandas as pd
+
+
+def extract_file_context(uploaded_files):
+    """
+    Extract structured, LLM-friendly summaries from uploaded files
+    instead of dumping full content.
+    """
+    context_snippets = []
+
+    for file in uploaded_files:
+        filename = file.name.lower()
+
+        try:
+            if filename.endswith(".csv"):
+                df = pd.read_csv(file)
+                inferred = {}
+
+                # Infer column data types
+                for col in df.columns:
+                    dtype = str(df[col].dtype)
+                    if "int" in dtype:
+                        inferred[col] = "INT"
+                    elif "float" in dtype or "double" in dtype:
+                        inferred[col] = "FLOAT"
+                    elif "date" in col.lower():
+                        inferred[col] = "DATE"
+                    else:
+                        inferred[col] = "STRING"
+
+                snippet = (
+                    f"File: {file.name}\n"
+                    f"Type: CSV\n"
+                    f"Columns & Types: {inferred}\n"
+                    f"Sample Row: {df.head(1).to_dict(orient='records')[0]}"
+                )
+                context_snippets.append(snippet)
+
+            elif filename.endswith(".json"):
+                data = json.load(file)
+                # If JSON is a list of dicts, infer keys
+                if isinstance(data, list) and len(data) > 0 and isinstance(data[0], dict):
+                    keys = list(data[0].keys())
+                    snippet = (
+                        f"File: {file.name}\n"
+                        f"Type: JSON\n"
+                        f"Top-Level Keys: {keys}\n"
+                        f"Sample Entry: {data[0]}"
+                    )
+                else:
+                    snippet = (
+                        f"File: {file.name}\n"
+                        f"Type: JSON\n"
+                        f"Content Preview: {str(data)[:400]}"
+                    )
+                context_snippets.append(snippet)
+
+            elif filename.endswith(".txt"):
+                text = file.read().decode("utf-8")[:400]
+                snippet = (
+                    f"File: {file.name}\n"
+                    f"Type: TXT\n"
+                    f"Content Preview: {text}"
+                )
+                context_snippets.append(snippet)
+
+        except Exception as e:
+            context_snippets.append(f"Error processing {file.name}: {e}")
+
+    return "\n\n".join(context_snippets) if context_snippets else ""
+
 
 # =========================
 # Header + Theme Toggle
@@ -39,6 +110,14 @@ user_prompt = st.text_area(
     height=150,
     placeholder="e.g. Analyze online sales by product, customer, and time."
 )
+
+# 📁 Optional: File Upload for RAG Context
+uploaded_files = st.file_uploader(
+    "Upload relevant files (CSV, JSON, or TXT) for context-aware schema generation:",
+    type=["csv", "json", "txt"],
+    accept_multiple_files=True
+)
+
 
 sql_dialect = st.selectbox(
     "Select SQL Dialect:",
@@ -104,30 +183,56 @@ if st.button("Generate Schema + SQL DDL + ERD", type="primary"):
     else:
         with st.spinner("Generating with Llama 3..."):
             try:
+                file_context = extract_file_context(uploaded_files) if uploaded_files else "No external documents provided."
+                #if file_context and file_context.strip() != "No external documents provided.":
                 full_prompt = f"""
-You are a data modeling assistant. The user will describe a business scenario.
-Design a STAR SCHEMA (1 fact table + supporting dimension tables).
-Return the schema ONLY in valid JSON format with this structure:
-{{
-  "fact_table": {{
-    "name": "FactTableName",
-    "columns": [
-      {{"name": "ColumnName", "type": "datatype", "description": "what it stores"}}
-    ]
-  }},
-  "dimension_tables": [
-    {{
-      "name": "DimTableName",
-      "columns": [
-        {{"name": "ColumnName", "type": "datatype", "description": "what it stores"}}
-      ]
-    }}
-  ]
-}}
 
-SQL Dialect: {sql_dialect}
-User prompt: {user_prompt}
-"""
+                You are a data modeling assistant.
+
+                Follow these rules carefully:
+
+                1. Use ALL columns and datatypes from uploaded files exactly as they appear.
+                - Do not rename or ignore them.
+                - Include them in relevant dimension or fact tables.
+
+                2. If the user prompt mentions concepts or entities NOT found in the uploaded files (e.g., purchases, subscriptions, orders):
+                - You MAY create new tables and columns to represent them.
+                - Infer column names and datatypes logically.
+                - Do NOT remove any file-based fields just because they weren’t mentioned.
+
+                3. Prioritize file-grounded fields first. Then extend with reasonable invented fields as needed to satisfy the user prompt.
+
+                4. The final design should blend:
+                ✅ File-based columns
+                ✅ Prompt-driven inferred columns (only where files don’t cover it)
+               
+                5. Output MUST follow this strict JSON format:
+                {{
+                "fact_table": {{
+                    "name": "FactTableName",
+                    "columns": [
+                    {{"name": "ColumnName", "type": "datatype", "description": "what it stores"}}
+                    ]
+                }},
+                "dimension_tables": [
+                    {{
+                    "name": "DimTableName",
+                    "columns": [
+                        {{"name": "ColumnName", "type": "datatype", "description": "what it stores"}}
+                    ]
+                    }}
+                ]
+                }}
+
+                User Prompt:
+                {user_prompt}
+
+                Uploaded File Context (use everything here first, and extend only when needed):
+                {file_context}
+
+                SQL Dialect: {sql_dialect}
+                """
+
 
                 output = call_ollama_cached(full_prompt)
 
