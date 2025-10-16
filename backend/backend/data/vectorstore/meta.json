@@ -1,0 +1,11 @@
+[
+  {
+    "path": "backend/data/uploads/inventory.txt",
+    "type": "text",
+    "summary": {
+      "n_chars": 453,
+      "preview": "These are notes about our customer base for Q1.\n\nWe currently have users from the United States, Canada, and Europe.\nMost of them signed up through online campaigns and referrals.\nCustomer satisfactio"
+    },
+    "embed_text": "Document notes:\nThese are notes about our customer base for Q1.\n\nWe currently have users from the United States, Canada, and Europe.\nMost of them signed up through online campaigns and referrals.\nCustomer satisfaction is highest among those who registered in early 2023.\n\nPriorities for the next quarter include:\n- Improving onboarding experience\n- Tracking churn risk signals\n- Segmenting users by region and signup date\n- Enhancing email communication and engagement\n"
+  }
+]
